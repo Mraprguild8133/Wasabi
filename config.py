@@ -13,19 +13,20 @@ class Config:
     WASABI_REGION = os.environ.get("WASABI_REGION", "us-east-1")
     WASABI_ENDPOINT = f"https://s3.{WASABI_REGION}.wasabisys.com"
     
-    # Speed Optimization Settings
+    # ULTRA SPEED Settings
     MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
     PRESIGNED_URL_EXPIRY = 3600  # 1 hour
     
-    # ULTRA SPEED OPTIMIZATIONS
-    MAX_WORKERS = 8
-    CHUNK_SIZE = 64 * 1024 * 1024  # 64MB chunks
-    MULTIPART_THRESHOLD = 64 * 1024 * 1024  # 64MB
-    MAX_CONCURRENCY = 10
+    # MAXIMUM SPEED OPTIMIZATIONS
+    MAX_WORKERS = 20  # Maximum workers for parallel processing
+    CHUNK_SIZE = 50 * 1024 * 1024  # 50MB chunks for maximum throughput
+    MULTIPART_THRESHOLD = 50 * 1024 * 1024  # 50MB
+    MAX_CONCURRENCY = 20  # Maximum concurrent connections
     
-    # Network optimizations
-    SOCKET_TIMEOUT = 30
-    CONNECT_TIMEOUT = 10
-    READ_TIMEOUT = 30
+    # Network optimizations - ULTRA AGGRESSIVE
+    SOCKET_TIMEOUT = 60
+    CONNECT_TIMEOUT = 15
+    READ_TIMEOUT = 60
+    RETRIES = 1  # Fewer retries for speed
 
 config = Config()
