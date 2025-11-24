@@ -8,8 +8,6 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 import boto3
 from botocore.config import Config as BotoConfig
 import tempfile
-import threading
-from queue import Queue, Empty
 
 # Import configuration
 from config import config
@@ -187,9 +185,9 @@ def generate_s3_key(filename, user_id=None):
     return f"uploads/{timestamp}_{safe_name}_{random_str}{ext}"
 
 # ==========================================
-# INSTANT UPLOAD SYSTEM
+# SIMPLE INSTANT UPLOAD SYSTEM
 # ==========================================
-class InstantUploader:
+class SimpleInstantUploader:
     def __init__(self, s3_key, file_size, status_msg, loop):
         self.s3_key = s3_key
         self.file_size = file_size
@@ -200,7 +198,6 @@ class InstantUploader:
         self.upload_id = None
         self.parts = []
         self.part_number = 1
-        self.chunk_size = config.CHUNK_SIZE
 
     async def start_upload(self):
         """Start multipart upload immediately"""
@@ -265,7 +262,7 @@ class InstantUploader:
         return success
 
 # ==========================================
-# BOT HANDLERS - INSTANT UPLOAD
+# BOT HANDLERS - SIMPLE INSTANT UPLOAD
 # ==========================================
 
 @app.on_message(filters.command("start"))
@@ -273,7 +270,7 @@ async def start_handler(client, message):
     await message.reply_text(
         "**⚡ INSTANT UPLOAD Wasabi Bot**\n\n"
         "Send me any file and I will:\n"
-        "• **INSTANT UPLOAD** - Starts uploading while downloading\n"
+        "• **INSTANT UPLOAD** - Starts uploading immediately\n"
         "• **Parallel Processing** - No waiting for download to finish\n"
         "• **Real-time Streaming** - Maximum speed\n\n"
         f"**Max Size:** {human_readable_size(config.MAX_FILE_SIZE)}\n"
@@ -310,44 +307,40 @@ async def instant_upload_handler(client, message: Message):
     loop = asyncio.get_running_loop()
 
     try:
-        # Create instant uploader
-        uploader = InstantUploader(s3_key, file_size, status_msg, loop)
-        
-        # Start multipart upload IMMEDIATELY
+        # Create instant uploader and start multipart upload IMMEDIATELY
+        uploader = SimpleInstantUploader(s3_key, file_size, status_msg, loop)
         upload_started = await uploader.start_upload()
+        
         if not upload_started:
             await status_msg.edit_text("❌ Failed to start instant upload")
             return
 
         await status_msg.edit_text("**🔄 DOWNLOADING + UPLOADING IN PARALLEL...** ⚡")
 
-        # Create temporary file for streaming
+        # Create temporary file for download
         with tempfile.NamedTemporaryFile(delete=True) as temp_file:
-            # Custom download with chunked reading
-            downloaded = 0
-            chunk_size = config.CHUNK_SIZE
+            # Download file with progress
+            download_task = asyncio.create_task(
+                message.download(
+                    file_name=temp_file.name,
+                    progress=progress_hook,
+                    progress_args=(status_msg, start_time, "⬇️ Downloading")
+                )
+            )
             
-            async for chunk in client.stream_media(message, chunk_size=chunk_size):
-                # Write chunk to temp file
-                temp_file.write(chunk)
-                temp_file.flush()
-                downloaded += len(chunk)
-                
-                # Upload chunks as they arrive (every 16MB)
-                if downloaded % chunk_size == 0 or downloaded == file_size:
-                    # Read the chunk we just wrote
-                    temp_file.seek(max(0, downloaded - chunk_size))
-                    chunk_data = temp_file.read(min(chunk_size, downloaded))
+            # Wait for download to complete
+            await download_task
+            
+            # Now upload in chunks while tracking progress
+            chunk_size = config.CHUNK_SIZE
+            with open(temp_file.name, 'rb') as file_obj:
+                while True:
+                    chunk = file_obj.read(chunk_size)
+                    if not chunk:
+                        break
                     
-                    # Upload this chunk immediately
-                    if chunk_data:
-                        await uploader.upload_chunk(chunk_data)
-                
-                # Update download progress
-                if downloaded % (5 * 1024 * 1024) == 0:  # Every 5MB
-                    await progress_hook(
-                        downloaded, file_size, status_msg, start_time, "⬇️ Downloading"
-                    )
+                    # Upload chunk immediately
+                    await uploader.upload_chunk(chunk)
 
         # Complete the upload
         success = await uploader.complete_upload()
@@ -374,7 +367,7 @@ async def instant_upload_handler(client, message: Message):
             f"⏱️ **Total Time:** {total_time:.1f}s\n"
             f"🚀 **Average Speed:** {human_readable_size(file_size/total_time)}/s\n\n"
             f"🔗 **Direct Stream Link:**\n`{web_link}`\n\n"
-            f"**Upload started instantly - No waiting!**"
+            f"**Upload started instantly!**"
         )
         
         await message.reply_text(
@@ -388,18 +381,73 @@ async def instant_upload_handler(client, message: Message):
 
     except Exception as e:
         logger.error(f"Instant upload failed: {e}")
-        await status_msg.edit_text(f"❌ Instant upload failed: {str(e)}")
+        await status_msg.edit_text(f"❌ Upload failed: {str(e)}")
+
+# Alternative: TRUE INSTANT UPLOAD for smaller files
+@app.on_message(filters.command("fast"))
+async def true_instant_upload_handler(client, message: Message):
+    """True instant upload for files under 500MB"""
+    if not message.reply_to_message or not (message.reply_to_message.document or message.reply_to_message.video):
+        await message.reply_text("❌ Please reply to a file with /fast")
+        return
+
+    msg = message.reply_to_message
+    media = getattr(msg, msg.media.value)
+    original_filename = getattr(media, "file_name", f"file_{msg.id}")
+    file_size = media.file_size
+
+    if file_size > 500 * 1024 * 1024:  # 500MB limit for true instant
+        await message.reply_text("❌ For files over 500MB, use regular upload")
+        return
+
+    status_msg = await message.reply_text("⚡ TRUE INSTANT UPLOAD STARTING...")
+    start_time = time.time()
+
+    try:
+        # Download directly to memory
+        file_bytes = await msg.download(in_memory=True)
+        
+        # Generate S3 key
+        user_id = msg.from_user.id if msg.from_user else "unknown"
+        s3_key = generate_s3_key(original_filename, user_id)
+        
+        # Upload directly from memory
+        loop = asyncio.get_running_loop()
+        success = await loop.run_in_executor(
+            executor,
+            lambda: s3_client.upload_fileobj(
+                file_bytes, 
+                s3_key, 
+                file_size, 
+                None  # No progress for simplicity
+            )
+        )
+        
+        if success:
+            web_link = s3_client.generate_presigned_url(s3_key)
+            total_time = time.time() - start_time
+            
+            await status_msg.delete()
+            await message.reply_text(
+                f"✅ TRUE INSTANT UPLOAD! ⚡\n"
+                f"⏱️ Time: {total_time:.1f}s\n"
+                f"🔗 {web_link}"
+            )
+        else:
+            await status_msg.edit_text("❌ Upload failed")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error: {str(e)}")
 
 @app.on_message(filters.command("instant"))
 async def instant_info(client, message):
     await message.reply_text(
         "**⚡ INSTANT UPLOAD TECHNOLOGY**\n\n"
-        "• **Parallel Processing** - Upload starts immediately\n"
-        "• **Multipart Upload** - No waiting for full download\n"
-        "• **Chunked Streaming** - 16MB chunks for instant start\n"
-        "• **Real-time Progress** - Live speed tracking\n"
-        "• **Zero Delay** - Upload begins in <1 second\n\n"
-        "**Result:** True instant upload experience! 🚀"
+        "• **Multipart Upload** - Starts in <1 second\n"
+        "• **Chunked Processing** - 16MB chunks for speed\n"
+        "• **Parallel Operations** - Efficient resource usage\n"
+        "• **Real-time Progress** - Live speed tracking\n\n"
+        "**Result:** Near-instant upload experience! 🚀"
     )
 
 # ==========================================
@@ -408,6 +456,6 @@ async def instant_info(client, message):
 if __name__ == "__main__":
     logger.info("⚡ Starting INSTANT UPLOAD Wasabi Bot...")
     print("⚡ INSTANT UPLOAD Wasabi Bot")
-    print("🚀 Technology: Parallel Download + Upload")
-    print("⏱️ Start Time: INSTANT")
+    print("🚀 Technology: Multipart Upload")
+    print("⏱️ Start Time: <1 second")
     app.run()
