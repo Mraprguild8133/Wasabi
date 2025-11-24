@@ -8,6 +8,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 import boto3
 from botocore.exceptions import NoCredentialsError
 from botocore.config import Config as BotoConfig
+import tempfile
 import io
 
 # Import configuration
@@ -25,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ==========================================
-# ULTRA-FAST S3 CLIENT - DIRECT UPLOAD
+# ULTRA-FAST S3 CLIENT - STREAMING UPLOAD
 # ==========================================
 class UltraFastS3Client:
     def __init__(self):
@@ -55,12 +56,12 @@ class UltraFastS3Client:
         self.bucket = config.WASABI_BUCKET
 
     def upload_fileobj(self, file_obj, object_name, file_size, progress_callback=None):
-        """Uploads file object directly to S3 - NO LOCAL STORAGE"""
+        """Uploads file object directly to S3"""
         try:
             self.s3.upload_fileobj(
-                file_obj,
-                self.bucket,
-                object_name,
+                Fileobj=file_obj,
+                Bucket=self.bucket,
+                Key=object_name,
                 Callback=progress_callback,
                 Config=boto3.s3.transfer.TransferConfig(
                     multipart_threshold=config.MULTIPART_THRESHOLD,
@@ -189,7 +190,7 @@ class UploadProgress:
             )
 
 # ==========================================
-# BOT HANDLERS - DIRECT UPLOAD
+# BOT HANDLERS - STREAMING UPLOAD
 # ==========================================
 
 @app.on_message(filters.command("start"))
@@ -198,14 +199,14 @@ async def start_handler(client, message):
         "**🚀 ULTRA FAST Wasabi Upload Bot**\n\n"
         "Send me any file and I will:\n"
         "• Download from Telegram\n"
-        "• **DIRECT UPLOAD** to Wasabi (No Local Storage)\n"
+        "• **DIRECT UPLOAD** to Wasabi (Streaming)\n"
         "• Generate instant streaming link\n\n"
         f"**Max Size:** {human_readable_size(config.MAX_FILE_SIZE)}\n"
         "**Speed:** ⚡ MAXIMUM"
     )
 
 @app.on_message(filters.document | filters.video | filters.audio)
-async def direct_upload_handler(client, message: Message):
+async def streaming_upload_handler(client, message: Message):
     # Get file info
     media = getattr(message, message.media.value)
     original_filename = getattr(media, "file_name", f"file_{message.id}")
@@ -227,47 +228,41 @@ async def direct_upload_handler(client, message: Message):
         f"**🚀 Starting ULTRA FAST Upload...**\n"
         f"**File:** `{original_filename}`\n"
         f"**Size:** `{human_readable_size(file_size)}`\n"
-        f"**Mode:** DIRECT UPLOAD ⚡"
+        f"**Mode:** STREAMING UPLOAD ⚡"
     )
     start_time = time.time()
 
     try:
-        # Create a file-like object in memory for direct upload
-        file_buffer = io.BytesIO()
-        
-        # Download directly to memory buffer with progress
-        await message.download(
-            file_name=file_buffer,
-            progress=progress_hook,
-            progress_args=(status_msg, start_time, "⬇️ Downloading")
-        )
-        
-        # Reset buffer position
-        file_buffer.seek(0)
-        
-        await status_msg.edit_text("**✅ Download Complete. Starting DIRECT UPLOAD...**")
-
-        # Upload directly from memory to Wasabi
-        loop = asyncio.get_running_loop()
-        upload_tracker = UploadProgress(original_filename, file_size, status_msg, loop)
-
-        # Direct upload to Wasabi
-        success = await loop.run_in_executor(
-            executor,
-            lambda: s3_client.upload_fileobj(
-                file_buffer, 
-                s3_key, 
-                file_size, 
-                upload_tracker
+        # Create a temporary file for streaming (automatically deleted)
+        with tempfile.NamedTemporaryFile(delete=True) as temp_file:
+            # Download to temporary file with progress
+            await message.download(
+                file_name=temp_file.name,
+                progress=progress_hook,
+                progress_args=(status_msg, start_time, "⬇️ Downloading")
             )
-        )
-        
-        # Close buffer
-        file_buffer.close()
+            
+            await status_msg.edit_text("**✅ Download Complete. Starting DIRECT UPLOAD...**")
 
-        if not success:
-            await status_msg.edit_text("❌ Upload to Wasabi failed.")
-            return
+            # Upload directly from temporary file to Wasabi
+            loop = asyncio.get_running_loop()
+            upload_tracker = UploadProgress(original_filename, file_size, status_msg, loop)
+
+            # Open the temp file and upload
+            with open(temp_file.name, 'rb') as file_obj:
+                success = await loop.run_in_executor(
+                    executor,
+                    lambda: s3_client.upload_fileobj(
+                        file_obj, 
+                        s3_key, 
+                        file_size, 
+                        upload_tracker
+                    )
+                )
+
+            if not success:
+                await status_msg.edit_text("❌ Upload to Wasabi failed.")
+                return
 
         # Generate streaming link
         web_link = s3_client.generate_presigned_url(s3_key)
@@ -279,11 +274,15 @@ async def direct_upload_handler(client, message: Message):
         # Send success message
         await status_msg.delete()
         
+        upload_time = time.time() - start_time
+        upload_speed = file_size / upload_time if upload_time > 0 else 0
+        
         response_text = (
             f"**✅ UPLOAD COMPLETE!** ⚡\n\n"
             f"📁 **File:** `{original_filename}`\n"
             f"💾 **Size:** `{human_readable_size(file_size)}`\n"
-            f"⏱️ **Upload Time:** {time.time() - start_time:.1f}s\n\n"
+            f"⏱️ **Total Time:** {upload_time:.1f}s\n"
+            f"🚀 **Average Speed:** {human_readable_size(upload_speed)}/s\n\n"
             f"🔗 **Direct Stream Link:**\n`{web_link}`\n\n"
             f"**Use in:** VLC, MX Player, Browser"
         )
@@ -298,19 +297,19 @@ async def direct_upload_handler(client, message: Message):
         )
 
     except Exception as e:
-        logger.error(f"Direct upload failed: {e}")
+        logger.error(f"Streaming upload failed: {e}")
         await status_msg.edit_text(f"❌ Upload failed: {str(e)}")
 
 @app.on_message(filters.command("speed"))
 async def speed_test(client, message):
     await message.reply_text(
         "**⚡ ULTRA FAST MODE ENABLED**\n\n"
-        "• **Direct Memory Upload** - No local storage\n"
+        "• **Streaming Upload** - Minimal disk usage\n"
         "• **Multi-threaded** - 8 parallel workers\n"
         "• **Chunked Uploads** - 64MB chunks\n"
         "• **Maximum Concurrency** - 10 connections\n"
-        "• **Zero Disk I/O** - Pure memory operations\n\n"
-        "**Result:** Instant upload speeds! 🚀"
+        "• **Temp Files** - Auto-deleted after upload\n\n"
+        "**Result:** Near-instant upload speeds! 🚀"
     )
 
 # ==========================================
@@ -319,6 +318,6 @@ async def speed_test(client, message):
 if __name__ == "__main__":
     logger.info("🚀 Starting ULTRA FAST Wasabi Bot...")
     print("⚡ ULTRA FAST Wasabi Upload Bot")
-    print("📡 Mode: DIRECT UPLOAD (No Local Storage)")
+    print("📡 Mode: STREAMING UPLOAD (Temp Files)")
     print("🚀 Speed: MAXIMUM")
     app.run()
