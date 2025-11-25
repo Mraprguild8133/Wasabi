@@ -1,8 +1,7 @@
-import os
+# config.py
 
-class Config:
-    # Telegram API
-TOKEN ="BOT_TOKEN",
+# Bot Token from BotFather
+TOKEN = "YOUR_ACTUAL_BOT_TOKEN_HERE"
 
 # Database file path
 DB_FILE = "bot_database.db"
@@ -11,6 +10,6 @@ DB_FILE = "bot_database.db"
 FLOOD_LIMIT = 5  # messages
 FLOOD_WINDOW = 5  # seconds
 
-#Optional: other configuration items
-ADMIN_IDS = [123456789, 987654321]  # Admin ID list
- LOG_LEVEL = "INFO"
+# Optional: other configuration items
+# ADMIN_IDS = [123456789, 987654321]  # Admin ID list
+# LOG_LEVEL = "INFO"
