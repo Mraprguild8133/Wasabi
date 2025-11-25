@@ -1,7 +1,7 @@
 # config.py
 
 # Bot Token from BotFather
-TOKEN = "BOT_TOKEN"
+TOKEN = ("BOT_TOKEN")
 
 # Database file path
 DB_FILE = "bot_database.db"
