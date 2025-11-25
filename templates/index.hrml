@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Group Manager Bot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+        .endpoints {
+            margin-top: 30px;
+        }
+        a {
+            color: #ffeb3b;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Group Manager Bot</h1>
+        
+        <div class="status">
+            <h2>🚀 Status: Running</h2>
+            <p>Your Telegram Group Manager Bot is successfully running!</p>
+        </div>
+
+        <div class="features">
+            <h3>✨ Features:</h3>
+            <ul>
+                <li>Advanced moderation tools</li>
+                <li>Welcome messages with images</li>
+                <li>Captcha verification</li>
+                <li>Anti-flood protection</li>
+                <li>Multi-language support</li>
+                <li>Crypto price checker</li>
+            </ul>
+        </div>
+
+        <div class="endpoints">
+            <h3>🔗 Available Endpoints:</h3>
+            <ul>
+                <li><a href="/health">/health</a> - Health check</li>
+                <li><a href="/stats">/stats</a> - Bot statistics</li>
+            </ul>
+        </div>
+
+        <div class="info">
+            <p><strong>📞 Need help?</strong> Contact the bot administrator or check the Telegram bot directly.</p>
+        </div>
+    </div>
+</body>
+</html>
